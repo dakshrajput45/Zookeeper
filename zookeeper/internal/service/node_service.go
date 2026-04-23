@@ -136,3 +136,17 @@ func (s *NodeService) AliveNodeIDs() []string {
 	}
 	return out
 }
+
+func (s *NodeService) NodeByID(nodeID string) (registeredNode, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	node, ok := s.nodes[nodeID]
+	return node, ok
+}
+
+func (s *NodeService) HeartbeatTimeout() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.heartbeatTimeout
+}

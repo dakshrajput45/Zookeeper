@@ -18,6 +18,7 @@ go mod tidy
 Layered HTTP setup with:
 - `router -> controller -> service`
 - coordinator APIs for node registration, heartbeat, leader lookup, and alive nodes
+- automatic failover trigger via heartbeat-deadline based election monitor
 
 ## Project layout
 - `cmd\zkd` - application entrypoint
@@ -52,6 +53,40 @@ git push -u origin main
 - `POST /nodes/heartbeat`
 - `GET /leader`
 - `GET /nodes/alive`
+- `GET /election/state` (debug only; does not trigger election)
+
+## Automatic election behavior
+- The coordinator does not poll on a fixed interval for failover.
+- It tracks leader heartbeat deadline: `last_leader_heartbeat + heartbeat_timeout`.
+- If no heartbeat arrives before deadline, election starts automatically.
+- Election requests are sent to app nodes via `POST /vote-request`.
+- Current candidate set defaults to all alive nodes.
+- Leader is selected by highest vote count.
+- If votes tie, candidate with smallest `node_id` wins.
+
+## Current MVP election notes
+- Voting decision is delegated to app nodes via `/vote-request`.
+- Election state is observable via `GET /election/state`.
+- This is an MVP election model and will be hardened further in later phases.
+
+## App node contract (required)
+Each registered app node must expose:
+- `POST /vote-request`
+
+Request body sent by coordinator:
+```json
+{
+  "term": 2,
+  "candidate_ids": ["node-1", "node-2", "node-3"]
+}
+```
+
+Expected app response:
+```json
+{
+  "voted_for": "node-2"
+}
+```
 
 ## Quick curl examples
 ```bash
@@ -67,5 +102,6 @@ curl -s -X POST http://localhost:8080/nodes/heartbeat \
 
 curl -s http://localhost:8080/leader
 curl -s http://localhost:8080/nodes/alive
+curl -s http://localhost:8080/election/state
 ```
 

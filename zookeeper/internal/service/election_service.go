@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"sort"
@@ -46,6 +45,8 @@ type voteResponse struct {
 
 type ElectionService struct {
 	mu          sync.RWMutex
+	autoOnce    sync.Once
+	resetCh     chan struct{}
 	currentTerm int64
 	lastResult  ElectionResult
 	nodeService *NodeService
@@ -55,6 +56,7 @@ type ElectionService struct {
 func NewElectionService(nodeService *NodeService) *ElectionService {
 	return &ElectionService{
 		nodeService: nodeService,
+		resetCh:     make(chan struct{}, 1),
 		client: &http.Client{
 			Timeout: 3 * time.Second,
 		},
@@ -73,7 +75,7 @@ func (s *ElectionService) RunElection(req RunElectionRequest) (ElectionResult, e
 		return ElectionResult{}, ErrNoAliveNodes
 	}
 
-	candidates := s.resolveCandidates(req.CandidateIDs, voters)
+	candidates := resolveCandidates(req.CandidateIDs, voters)
 	if len(candidates) == 0 {
 		return ElectionResult{}, ErrNoValidCandidates
 	}
@@ -116,6 +118,7 @@ func (s *ElectionService) RunElection(req RunElectionRequest) (ElectionResult, e
 	s.mu.Lock()
 	s.lastResult = result
 	s.mu.Unlock()
+	s.signalReset()
 
 	return result, nil
 }
@@ -126,6 +129,20 @@ func (s *ElectionService) LastResult() ElectionResult {
 	return s.lastResult
 }
 
+func (s *ElectionService) StartAuto() {
+	s.autoOnce.Do(func() {
+		go s.autoLoop()
+	})
+}
+
+func (s *ElectionService) ObserveHeartbeat(nodeID string) {
+	leaderID := s.nodeService.LeaderID()
+	if nodeID == "" || leaderID == "" || nodeID != leaderID {
+		return
+	}
+	s.signalReset()
+}
+
 func (s *ElectionService) nextTerm() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -133,7 +150,7 @@ func (s *ElectionService) nextTerm() int64 {
 	return s.currentTerm
 }
 
-func (s *ElectionService) resolveCandidates(requested []string, voters []NodeStatus) []string {
+func resolveCandidates(requested []string, voters []NodeStatus) []string {
 	aliveSet := make(map[string]bool, len(voters))
 	out := make([]string, 0, len(voters))
 	for _, node := range voters {
@@ -208,13 +225,71 @@ func selectWinner(counts map[string]int, candidates []string) (string, int) {
 	return winner, maxVotes
 }
 
-func (s *ElectionService) CurrentTerm() int64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.currentTerm
+func (s *ElectionService) autoLoop() {
+	timer := time.NewTimer(s.nextWaitDuration())
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			s.handleDeadline()
+			timer.Reset(s.nextWaitDuration())
+		case <-s.resetCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(s.nextWaitDuration())
+		}
+	}
 }
 
-func (s *ElectionService) DebugState() string {
-	last := s.LastResult()
-	return fmt.Sprintf("term=%d leader=%s", s.CurrentTerm(), last.LeaderID)
+func (s *ElectionService) nextWaitDuration() time.Duration {
+	leaderID := s.nodeService.LeaderID()
+	if strings.TrimSpace(leaderID) == "" {
+		return 1500 * time.Millisecond
+	}
+
+	leader, ok := s.nodeService.NodeByID(leaderID)
+	if !ok {
+		return 1500 * time.Millisecond
+	}
+
+	timeout := s.nodeService.HeartbeatTimeout()
+	deadline := leader.LastHeartbeat.Add(timeout)
+	wait := time.Until(deadline)
+	if wait <= 0 {
+		return 10 * time.Millisecond
+	}
+	return wait
 }
+
+func (s *ElectionService) handleDeadline() {
+	leaderID := s.nodeService.LeaderID()
+	if strings.TrimSpace(leaderID) == "" {
+		return
+	}
+
+	leader, ok := s.nodeService.NodeByID(leaderID)
+	if !ok {
+		_, _ = s.RunElection(RunElectionRequest{})
+		return
+	}
+
+	timeout := s.nodeService.HeartbeatTimeout()
+	if time.Since(leader.LastHeartbeat) <= timeout {
+		return
+	}
+
+	_, _ = s.RunElection(RunElectionRequest{})
+}
+
+func (s *ElectionService) signalReset() {
+	select {
+	case s.resetCh <- struct{}{}:
+	default:
+	}
+}
+
