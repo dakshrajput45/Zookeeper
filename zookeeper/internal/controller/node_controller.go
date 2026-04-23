@@ -10,11 +10,15 @@ import (
 )
 
 type NodeController struct {
-	nodeService *service.NodeService
+	nodeService     *service.NodeService
+	electionService *service.ElectionService
 }
 
-func NewNodeController(nodeService *service.NodeService) *NodeController {
-	return &NodeController{nodeService: nodeService}
+func NewNodeController(nodeService *service.NodeService, electionService *service.ElectionService) *NodeController {
+	return &NodeController{
+		nodeService:     nodeService,
+		electionService: electionService,
+	}
 }
 
 func (c *NodeController) RegisterNode(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +38,7 @@ func (c *NodeController) RegisterNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.nodeService.RegisterNode(req)
+	c.electionService.ObserveHeartbeat(req.NodeID)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accepted":  true,
 		"node_id":   req.NodeID,
@@ -65,6 +70,7 @@ func (c *NodeController) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to process heartbeat", http.StatusInternalServerError)
 		return
 	}
+	c.electionService.ObserveHeartbeat(req.NodeID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,

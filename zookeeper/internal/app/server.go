@@ -17,10 +17,13 @@ type Server struct {
 func NewServer(address string) *Server {
 	healthService := service.NewHealthService()
 	nodeService := service.NewNodeService()
+	electionService := service.NewElectionService(nodeService)
+	electionService.StartAuto()
 
 	healthController := controller.NewHealthController(healthService)
-	nodeController := controller.NewNodeController(nodeService)
-	httpRouter := router.NewHTTPRouter(healthController, nodeController)
+	nodeController := controller.NewNodeController(nodeService, electionService)
+	electionController := controller.NewElectionController(electionService)
+	httpRouter := router.NewHTTPRouter(healthController, nodeController, electionController)
 
 	return &Server{
 		httpServer: &http.Server{
