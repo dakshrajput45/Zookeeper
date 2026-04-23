@@ -1,0 +1,8 @@
+bin\
+dist\
+coverage.out
+*.log
+
+# Generated protobuf files
+internal\pb\*.pb.go
+
