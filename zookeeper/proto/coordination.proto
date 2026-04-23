@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package coordination.v1;
+
+option go_package = "zookeeper/internal/pb;pb";
+
+service CoordinationService {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Set(SetRequest) returns (SetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string address = 2;
+}
+
+message RegisterNodeResponse {
+  bool accepted = 1;
+  string leader_id = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+  int64 server_time_unix = 2;
+}
+
+message GetLeaderRequest {}
+
+message GetLeaderResponse {
+  string leader_id = 1;
+}
+
+message GetRequest {
+  string key = 1;
+}
+
+message GetResponse {
+  bool found = 1;
+  string value = 2;
+}
+
+message SetRequest {
+  string key = 1;
+  string value = 2;
+  string requester_node_id = 3;
+}
+
+message SetResponse {
+  bool ok = 1;
+  string leader_id = 2;
+}
+
+message DeleteRequest {
+  string key = 1;
+  string requester_node_id = 2;
+}
+
+message DeleteResponse {
+  bool ok = 1;
+  string leader_id = 2;
+}
+
