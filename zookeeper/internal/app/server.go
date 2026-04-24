@@ -18,12 +18,14 @@ func NewServer(address string) *Server {
 	healthService := service.NewHealthService()
 	nodeService := service.NewNodeService()
 	electionService := service.NewElectionService(nodeService)
+	replicationService := service.NewReplicationService(nodeService, electionService)
 	electionService.StartAuto()
 
 	healthController := controller.NewHealthController(healthService)
 	nodeController := controller.NewNodeController(nodeService, electionService)
 	electionController := controller.NewElectionController(electionService)
-	httpRouter := router.NewHTTPRouter(healthController, nodeController, electionController)
+	replicationController := controller.NewReplicationController(replicationService)
+	httpRouter := router.NewHTTPRouter(healthController, nodeController, electionController, replicationController)
 
 	return &Server{
 		httpServer: &http.Server{

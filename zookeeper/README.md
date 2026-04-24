@@ -54,6 +54,9 @@ git push -u origin main
 - `GET /leader`
 - `GET /nodes/alive`
 - `GET /election/state` (debug only; does not trigger election)
+- `POST /write` (client write entrypoint; no node id required)
+- `GET /read?key=...` (leader-routed read)
+- `GET /replication/state` (debug replication log in coordinator)
 
 ## Automatic election behavior
 - The coordinator does not poll on a fixed interval for failover.
@@ -69,9 +72,19 @@ git push -u origin main
 - Election state is observable via `GET /election/state`.
 - This is an MVP election model and will be hardened further in later phases.
 
+## Write replication behavior (coordinator role)
+- Client calls `POST /write` with `{ "key": "...", "value": "..." }`.
+- Coordinator resolves current leader internally.
+- Coordinator sends append request to every alive node at `POST /replication/append`.
+- Commit succeeds only when ACK count reaches quorum (`(alive_nodes/2)+1`).
+- If quorum is not reached, coordinator returns a quorum failure and write stays uncommitted.
+- Reads use simple leader approach: coordinator forwards `GET /read?key=...` to leader's internal read API.
+
 ## App node contract (required)
 Each registered app node must expose:
 - `POST /vote-request`
+- `POST /replication/append`
+- `GET /internal/read?key=...`
 
 Request body sent by coordinator:
 ```json
@@ -85,6 +98,28 @@ Expected app response:
 ```json
 {
   "voted_for": "node-2"
+}
+```
+
+Replication append request sent by coordinator:
+```json
+{
+  "index": 11,
+  "term": 3,
+  "leader_id": "node-2",
+  "key": "k1",
+  "value": "v1"
+}
+```
+
+Expected replication append response:
+- HTTP `200 OK` for ACK
+
+Expected internal read response:
+```json
+{
+  "found": true,
+  "value": "v1"
 }
 ```
 
@@ -103,5 +138,8 @@ curl -s -X POST http://localhost:8080/nodes/heartbeat \
 curl -s http://localhost:8080/leader
 curl -s http://localhost:8080/nodes/alive
 curl -s http://localhost:8080/election/state
+curl -s -X POST http://localhost:8080/write -H "Content-Type: application/json" -d '{"key":"k1","value":"v1"}'
+curl -s "http://localhost:8080/read?key=k1"
+curl -s http://localhost:8080/replication/state
 ```
 
